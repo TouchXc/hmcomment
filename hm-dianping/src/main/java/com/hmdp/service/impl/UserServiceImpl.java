@@ -9,14 +9,19 @@ import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.User;
 import com.hmdp.mapper.UserMapper;
 import com.hmdp.service.IUserService;
+import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RegexUtils;
 import com.hmdp.utils.SystemConstants;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.BeanUtils;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
-import java.util.Random;
+import java.time.Duration;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * <p>
@@ -30,6 +35,9 @@ import java.util.Random;
 @Service
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IUserService {
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
     @Override
     public Result sendCode(String phone, HttpSession session) {
         // 1.校验手机号
@@ -40,7 +48,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
         // 3.生成验证码保存
         String code = RandomUtil.randomNumbers(6);
-        session.setAttribute("code",code);
+
+        stringRedisTemplate.opsForValue().set(RedisConstants.LOGIN_CODE_KEY+phone,code, RedisConstants.LOGIN_CODE_TTL, TimeUnit.MINUTES);
         log.debug("发送验证码成功，验证码：{}",code);
         // 4.返回ok
         return Result.ok();
@@ -53,17 +62,23 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             // 2.不符合返回错误信息
             return Result.fail("手机号格式错误！");
         }
-        Object cacheCode = session.getAttribute("code");
+        String cacheCode = stringRedisTemplate.opsForValue().get(RedisConstants.LOGIN_CODE_KEY+phone);
         String code = loginForm.getCode();
-        if(cacheCode==null||!cacheCode.toString().equals(code)){
+        if(cacheCode==null||!cacheCode.equals(code)){
             return Result.fail("验证码错误");
         }
         User user = query().eq("phone", phone).one();
         if (user == null) {
             user = createUserWithPhone(phone);
         }
-        session.setAttribute("user", BeanUtil.copyProperties(user, UserDTO.class));
-        return Result.ok();
+        String token = UUID.randomUUID().toString();
+        UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
+        Map<String, Object> userMap = BeanUtil.beanToMap(userDTO);
+        // 确保将所有 Long 类型的字段转换为 String
+        userMap.replaceAll((k, v) -> (v instanceof Long) ? String.valueOf(v) : v);
+        stringRedisTemplate.opsForHash().putAll(RedisConstants.LOGIN_USER_KEY+token,userMap);
+        stringRedisTemplate.expire(RedisConstants.LOGIN_USER_KEY+token, Duration.ofMinutes(RedisConstants.LOGIN_USER_TTL));
+        return Result.ok(token);
     }
 
     private User createUserWithPhone(String phone) {
