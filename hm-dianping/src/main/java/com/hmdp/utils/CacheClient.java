@@ -6,6 +6,7 @@ import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.hmdp.entity.Shop;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -60,21 +61,21 @@ public class CacheClient {
         return r;
     }
 
-
     public <R,ID> R queryWithLogicExpire(String keyPrefix,ID id,Class<R> type, Function<ID,R> dbFallback,Long time, TimeUnit timeUnit){
-        String key = keyPrefix + id.toString();
+        String key = keyPrefix + id;
         String json = stringRedisTemplate.opsForValue().get(key);
         if (StrUtil.isBlank(json)) {
             return null;
         }
-        RedisData redisData = JSONUtil.toBean(json, RedisData.class, true);
+        RedisData redisData = JSONUtil.toBean(json, RedisData.class);
         JSONObject data = (JSONObject)redisData.getData();
-        R r = JSONUtil.toBean(data, type, true);
+        R r = JSONUtil.toBean(data, type);
         LocalDateTime expire = redisData.getExpireTime();
         if (expire.isAfter(LocalDateTime.now())) {
             return r;
         }
-        String lockKey = RedisConstants.LOCK_SHOP_KEY+id;
+        // 获取锁
+        String lockKey = keyPrefix+id;
         boolean isLock = tryLock(lockKey);
         if (isLock) {
             CACHE_BUILD_EXECUTOR.submit(()->{
