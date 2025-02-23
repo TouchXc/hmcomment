@@ -56,4 +56,15 @@ public interface IBlogService extends IService<Blog> {
      */
     Result queryBlogOfFollow(Long max, Integer offset);
 
+    /**
+     * 用户签到
+     * @return
+     */
+    Result sign();
+
+    /**
+     * 统计签到情况
+     * @return
+     */
+    Result signCount();
 }
